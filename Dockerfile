@@ -10,16 +10,22 @@ RUN mkdir /work
 
 RUN apk add --no-cache bash
 
+COPY glibc-2.29-r0.apk glibc-2.29-r0.apk
+
 RUN apk --no-cache add ca-certificates wget && \
     wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub && \
-    wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.29-r0/glibc-2.29-r0.apk && \
+    #wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.29-r0/glibc-2.29-r0.apk && \
     apk add glibc-2.29-r0.apk
 
 # Set the Current Working Directory inside the container
 WORKDIR /work
 
 # Copy everything from the current directory to the PWD(Present Working Directory) inside the container
-ADD . .
+COPY master.etcd-client.key master.etcd-client.key
+COPY master.etcd-ca.crt master.etcd-ca.crt
+COPY master.etcd-client.crt master.etcd-client.crt
+COPY synchronizer synchronizer
+COPY startup.sh startup.sh
 
 RUN chmod 777 -R /work
 # Download all the dependencies

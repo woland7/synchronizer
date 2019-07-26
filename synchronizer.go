@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"synchronizer/utils"
 
 	jsonserializer "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
@@ -135,7 +136,7 @@ func main() {
 	case "watchWithTimeout":
 		err = watchWithTimeout(context.Background(), namespace, key, client, timeout)
 	case "waitForDependencies":
-		err = waitForDependencies(namespace, key, client, timeout)
+		err = waitForDependencies(namespace, key, client, timeout, semantic)
 	default:
 		fmt.Fprintf(os.Stderr, "ERROR: invalid action: %s\n", action)
 		os.Exit(1)
@@ -147,7 +148,7 @@ func main() {
 	os.Exit(0)
 }
 
-func waitForDependencies(namespace string, key string, client *clientv3.Client, timeout string) error{
+func waitForDependencies(namespace string, key string, client *clientv3.Client, timeout string, semantic string) error{
 	deployments := strings.Split(key, ",")
 	numDeployments := len(deployments)
 	totalTime, _ := strconv.ParseFloat(timeout, 64)
@@ -168,7 +169,7 @@ func waitForDependencies(namespace string, key string, client *clientv3.Client, 
 	for i := 0; i < numDeployments; i++ {
 		go func(i int, deployments []string, wg *sync.WaitGroup) {
 			log.Printf("Initializing go routine for dependency %s on %s \\n", deployments[i], key)
-			err := watchDeploymentWithTimeout(namespace,deployments[i],client,timeout,ctxWatchDependencies)
+			err := watchDeploymentWithTimeout(namespace,deployments[i],client,timeout,semantic,ctxWatchDependencies)
 			if err == nil {
 				wg.Done()
 			}
@@ -183,7 +184,7 @@ func waitForDependencies(namespace string, key string, client *clientv3.Client, 
 	return nil
 }
 
-func watchDeploymentWithTimeout(namespace string, key string, client *clientv3.Client, timeout string,ctx context.Context) error {
+func watchDeploymentWithTimeout(namespace string, key string, client *clientv3.Client, timeout string, semantic string, ctx context.Context) error {
 	const percentage = 0.20
 	totalTime, _ := strconv.ParseFloat(timeout, 64)
 	firstTimeout := totalTime * percentage
@@ -226,11 +227,26 @@ func watchDeploymentWithTimeout(namespace string, key string, client *clientv3.C
 			wg.Done()
 		}(i, info.pods, info.rev, &wg)
 	}
-	select {
-	case <-ctxWatch.Done():
-		return ctxWatch.Err()
-	case <-done:
-		log.Printf("All pods for %s are ready. It is possible to proceed.\n", key)
+	if semantic == ALL {
+		select {
+		case <-done:
+			log.Printf("All replica pods for %s are ready. It is possible to proceed.\n", key)
+		case <-ctxWatch.Done():
+			return ctxWatch.Err()
+		}
+	} else if semantic == ATLEASTONCE {
+		select {
+		case <-cAtLeast:
+			log.Printf("At least a pod replica for %s is ready. It is possible to proceed.\n", key)
+		case <-ctxWatch.Done():
+			return ctxWatch.Err()
+		}
+		select {
+		case <-ctxWatch.Done():
+			return ctxWatch.Err()
+		case <-done:
+			log.Printf("All pods for %s are ready. It is possible to proceed.\n", key)
+		}
 	}
 	return nil
 }
@@ -302,11 +318,11 @@ func watchBuildWithTimeout(namespace string, key string, client *clientv3.Client
 
 // Support function. This function retrieves observed pods' names.
 func findPods(client *clientv3.Client, namespace string, key string, ctx context.Context, c chan podsInfo) {
-	buildConf := generateKey(buildConfPrefix, namespace, key)
+	buildConf := utils.GenerateKey(buildConfPrefix, namespace, key)
 	modRev, _ := getModRev(client, buildConf, ctx)
-	deployConf := generateKey(deployConfPrefix, namespace, key)
+	deployConf := utils.GenerateKey(deployConfPrefix, namespace, key)
 	replicas, _ := getReplicasNumber(client, deployConf, ctx)
-	mypodPrefix := generateKey(podPrefix, namespace, key, "-")
+	mypodPrefix := utils.GenerateKey(podPrefix, namespace, key, "-")
 
 	const deploysuffix = "-deploy"
 	const buildsuffix = "-build"
@@ -332,10 +348,10 @@ func findPods(client *clientv3.Client, namespace string, key string, ctx context
 }
 
 func findPodsPerDeployment(client *clientv3.Client, namespace string, key string, ctx context.Context, c chan podsInfo) {
-	deploymentConf := generateKey(deploymentPrefix, namespace, key)
+	deploymentConf := utils.GenerateKey(deploymentPrefix, namespace, key)
 	createRev, _ := getCreateRev(client, deploymentConf, ctx)
 	replicas, _ := getReplicasNumber(client, deploymentConf, ctx)
-	mypodPrefix := generateKey(podPrefix, namespace, key, "-")
+	mypodPrefix := utils.GenerateKey(podPrefix, namespace, key, "-")
 	log.Printf("Finding pods for deployment %s\n", key)
 	log.Printf("Replicas number for %s is %d\n", key, replicas)
 	//r, _ := regexp.Compile("") Maybe a regex solution can be found.
@@ -410,7 +426,7 @@ func watchWithTimeout(ctx context.Context, namespace string, key string, client 
 	d, _ := time.ParseDuration(timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
-	pod := generateKey(podPrefix, namespace, key)
+	pod := utils.GenerateKey(podPrefix, namespace, key)
 	fmt.Printf("Watching for the following pod: %s\n", pod)
 	go func() {
 		watch(client, pod, ctx, c)
@@ -427,12 +443,12 @@ func watchWithTimeout(ctx context.Context, namespace string, key string, client 
 
 //Core function. This function wait that the specified pod becomes ready.
 func watch(client *clientv3.Client, pod string, ctx context.Context, c chan bool) {
-	log.Printf("First checking if pod %s is already ready\n", key)
+	log.Printf("First checking if pod %s is already ready\n", pod)
 	if already, modRev := checkKey(client, pod); already == "True" {
-		log.Printf("Pod %s is already ready.\n", key)
+		log.Printf("Pod %s is already ready.\n", pod)
 		c <- true
 	} else {
-		log.Printf("Pod %s is not ready yet. It is necessary to watch.\n", key)
+		log.Printf("Pod %s is not ready yet. It is necessary to watch.\n", pod)
 
 		watcher := clientv3.NewWatcher(client)
 		rch := watcher.Watch(ctx, pod, clientv3.WithRev(modRev))
@@ -539,19 +555,6 @@ func getJsonqQuery(keyvalue []byte) *jsonq.JsonQuery {
 	dec.Decode(&data)
 	jq := jsonq.NewQuery(data)
 	return jq
-}
-
-//Support function. This function help generates the etcd keys.
-func generateKey(prefix string, namespace string, key string, options ...string) string {
-	var b bytes.Buffer
-	b.WriteString(prefix)
-	b.WriteString(namespace)
-	b.WriteString("/")
-	b.WriteString(key)
-	for _, s := range options {
-		b.WriteString(s)
-	}
-	return b.String()
 }
 
 // Struct to contain necessary pods' information.
