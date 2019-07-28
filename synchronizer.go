@@ -68,8 +68,8 @@ func main() {
 		fmt.Fprint(os.Stderr, "ERROR: you need to specify timeout for watch operation.\n")
 		os.Exit(1)
 	}
-	if flag.Arg(0) == "waitForDependencies" && flag.NArg() == 3 {
-		fmt.Fprint(os.Stderr, "ERROR: you need to specify timeout for waitForDependecies operation.\n")
+	if flag.Arg(0) == "waitForDependencies" && flag.NArg() == 4 {
+		fmt.Fprint(os.Stderr, "ERROR: you need to specify semantic for waitForDependecies operation.\n")
 		os.Exit(1)
 	}
 	if flag.Arg(0) == "watchBuildWithTimeout" && flag.NArg() == 4 {
@@ -168,7 +168,7 @@ func waitForDependencies(namespace string, key string, client *clientv3.Client, 
 	defer cancelWatchDependencies()
 	for i := 0; i < numDeployments; i++ {
 		go func(i int, deployments []string, wg *sync.WaitGroup) {
-			log.Printf("Initializing go routine for dependency %s on %s \\n", deployments[i], key)
+			log.Printf("Initializing go routine for dependency %s\\n", deployments[i])
 			err := watchDeploymentWithTimeout(namespace,deployments[i],client,timeout,semantic,ctxWatchDependencies)
 			if err == nil {
 				wg.Done()
