@@ -408,7 +408,7 @@ func findPods(client *clientv3.Client, namespace string, key string, ctx context
 
 func findPodsPerDeployment(client *clientv3.Client, namespace string, key string, ctx context.Context, c chan podsInfo) {
 	deploymentConf := utils.GenerateKey(deploymentPrefix, namespace, key)
-	createRev, _ := getCreateRev(client, deploymentConf, ctx)
+	rev, _ := getModRev(client, deploymentConf, ctx)
 	replicas, _ := getReplicasNumber(client, deploymentConf, ctx)
 	mypodPrefix := utils.GenerateKey(podPrefix, namespace, key, "-")
 	log.Printf("Finding pods for deployment %s\n", key)
@@ -417,7 +417,7 @@ func findPodsPerDeployment(client *clientv3.Client, namespace string, key string
 	var info podsInfo
 	pods := make([]string, 0, replicas)
 	watcher := clientv3.NewWatcher(client)
-	rch := watcher.Watch(ctx, mypodPrefix, clientv3.WithPrefix(), clientv3.WithFilterDelete(), clientv3.WithRev(createRev))
+	rch := watcher.Watch(ctx, mypodPrefix, clientv3.WithPrefix(), clientv3.WithFilterDelete(), clientv3.WithRev(rev))
 	for wresp := range rch {
 		for _, ev := range wresp.Events {
 			if ev.IsCreate() {
@@ -429,7 +429,7 @@ func findPodsPerDeployment(client *clientv3.Client, namespace string, key string
 			}
 		}
 	}
-	info = podsInfo{rev: createRev, pods: pods}
+	info = podsInfo{rev: rev, pods: pods}
 	c <- info
 
 }
