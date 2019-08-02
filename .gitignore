@@ -2,3 +2,6 @@
 *.iml
 vendor/*
 glibc-2.29-r0.apk
+master.etcd-ca.crt
+master.etcd-client.crt
+master.etcd-client.key
